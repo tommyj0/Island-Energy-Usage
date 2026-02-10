@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Dict
 
-def calculate_monthly_usage(postcode: str, actual_households: int, monthly_relative_usage: Dict[str, float]) -> Dict[str, float]:
+def calculate_monthly_usage(postcode: str, actual_households: int, monthly_relative_usage: Dict[str, float], domestic_percentage: float = 0.406) -> Dict[str, float]:
   """
   Calculate monthly energy usage for a postcode based on actual households and monthly trends.
   
@@ -11,6 +11,7 @@ def calculate_monthly_usage(postcode: str, actual_households: int, monthly_relat
     actual_households: Number of households to scale to
     monthly_relative_usage: Dictionary mapping month names to relative usage factors
                            (e.g., {'January': 1.2, 'February': 1.15, ...})
+    domestic_percentage: Fraction of total energy consumption that is domestic (default: 0.406 for 40.6%)
   
   Returns:
     Dictionary with monthly consumption values in MWh
@@ -35,6 +36,10 @@ def calculate_monthly_usage(postcode: str, actual_households: int, monthly_relat
   
   # Calculate total usage for actual number of households
   total_annual_consumption = consumption_per_household * actual_households
+  
+  # The calculated result is domestic_percentage of total energy consumption
+  # Scale up to get the full total (e.g., if domestic is 40.6%, scale up by 1/0.406)
+  total_annual_consumption = total_annual_consumption / domestic_percentage
   
   # Normalize monthly relative usage so that it sums to 12 (average of 1.0 per month)
   sum_relative = sum(monthly_relative_usage.values())
