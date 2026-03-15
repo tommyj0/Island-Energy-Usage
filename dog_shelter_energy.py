@@ -42,12 +42,30 @@ def load_monthly_data(csv_path):
 
 
 class DogShelter:
-    def __init__(self, name, area, heat_loss_coef, climate, miscellaneous_per_area_watts=3, cooling_coef=2):
+    def __init__(
+        self,
+        name,
+        area,
+        heat_loss_coef,
+        climate,
+        miscellaneous_per_area_watts=3,
+        cooling_coef=2,
+        heating_efficiency=0.9,
+        cooling_efficiency=3.0,
+    ):
         self.name = name
         self.area = area  # m²
         self.heat_loss_coef = heat_loss_coef  # W/(m²·K) - Heat loss coefficient (typically 0.5-1.5 for buildings)
         self.cooling_coef = cooling_coef  # W/(m²·K) - Cooling/AC coefficient (typically 1.5-2.5)
+        self.heating_efficiency = heating_efficiency  # Boiler efficiency or heating COP equivalent
+        self.cooling_efficiency = cooling_efficiency  # Cooling COP/EER equivalent
         self.climate = climate
+
+        if self.heating_efficiency <= 0:
+            raise ValueError("heating_efficiency must be greater than 0")
+        if self.cooling_efficiency <= 0:
+            raise ValueError("cooling_efficiency must be greater than 0")
+
         # Placeholder value for lighting energy per m² in watts
         self.lighting_energy_per_area_watts = 2
         # Miscellaneous energy for appliances, small equipment, etc. per m² in watts
@@ -63,16 +81,23 @@ class DogShelter:
         print(f"Shelter Name: {self.name}")
         print(f"Area (m²): {self.area}")
         print(f"Heat Loss Coefficient (W/(m²·K)): {self.heat_loss_coef}")
+        print(f"Heating Efficiency/COP: {self.heating_efficiency}")
+        print(f"Cooling Efficiency/COP: {self.cooling_efficiency}")
         print(f"Climate: {self.climate}")
         print(f"Estimated Annual Total Energy Consumption (kWh): {
               self.energy_consumption:.2f}")
 
     def calculate_heating(self, temp_diff):
         """Calculate heating energy for a given temperature difference.
-        Formula: Heat Loss (W) × Area (m²) × Temp Diff (K) × Hours/Month ÷ 1000 = kWh
+        Formula:
+        Thermal Demand (W) = Heat Loss (W) × Area (m²) × Temp Diff (K)
+        Input Energy (kWh) = Thermal Demand × Hours/Month ÷ (1000 × heating_efficiency)
         """
         # temp_diff in K, area in m², 730 hours/month average, divide by 1000 to convert W to kW
-        heating_energy = temp_diff * self.area * self.heat_loss_coef * 730 / 1000
+        heating_energy = (
+            temp_diff * self.area * self.heat_loss_coef * 730
+            / (1000 * self.heating_efficiency)
+        )
         return heating_energy
 
     def calculate_lighting(self):
@@ -89,8 +114,11 @@ class DogShelter:
 
     def calculate_ac(self, temp_diff_cooling):
         """Calculate air conditioning energy for a given temperature difference above ideal."""
-        # Convert from W to kWh: multiply by hours in month (730 average) and divide by 1000
-        ac_energy = temp_diff_cooling * self.area * self.cooling_coef * 730 / 1000
+        # Convert from W to kWh and account for cooling system efficiency/COP.
+        ac_energy = (
+            temp_diff_cooling * self.area * self.cooling_coef * 730
+            / (1000 * self.cooling_efficiency)
+        )
         return ac_energy
 
     def calculate_total_energy(self, ideal_temperature=20):
@@ -171,9 +199,190 @@ class DogShelter:
         plt.grid(axis='y', alpha=0.3)
         plt.tight_layout()
         plt.savefig(f"{self.name}_monthly_energy.svg")
-        plt.show()
 
-    def estimate_solar_financials(self, monthly_solar_generation, sell_price_per_kwh, monthly_consumption=None, buy_price_per_kwh=None):
+    def build_financial_comparison(self, financials, analysis_years=1):
+        """Build cumulative cost series for solar versus grid-only operation."""
+        monthly_financials = financials["monthly"]
+        annual_financials = financials["annual"]
+        months = list(monthly_financials.keys())
+        buy_price_per_kwh = annual_financials["buy_price_per_kwh"]
+        initial_cost = annual_financials["initial_cost"]
+
+        months_elapsed = [0]
+        grid_only_cumulative_cost = [0]
+        solar_cumulative_cost = [initial_cost]
+        solar_advantage = [-initial_cost]
+        break_even_month = None
+
+        running_grid_only_cost = 0
+        running_solar_cost = initial_cost
+        month_counter = 0
+
+        for _ in range(analysis_years):
+            for month in months:
+                values = monthly_financials[month]
+                grid_only_monthly_cost = values["consumption_kwh"] * buy_price_per_kwh
+                solar_monthly_cost = (
+                    values["net_grid_import_kwh"] * buy_price_per_kwh
+                    - values["revenue"]
+                )
+
+                previous_advantage = running_grid_only_cost - running_solar_cost
+                running_grid_only_cost += grid_only_monthly_cost
+                running_solar_cost += solar_monthly_cost
+                month_counter += 1
+                current_advantage = running_grid_only_cost - running_solar_cost
+
+                months_elapsed.append(month_counter)
+                grid_only_cumulative_cost.append(running_grid_only_cost)
+                solar_cumulative_cost.append(running_solar_cost)
+                solar_advantage.append(current_advantage)
+
+                if break_even_month is None and previous_advantage < 0 <= current_advantage:
+                    advantage_delta = current_advantage - previous_advantage
+                    if advantage_delta == 0:
+                        break_even_month = float(month_counter)
+                    else:
+                        break_even_month = (month_counter - 1) + ((0 - previous_advantage) / advantage_delta)
+
+        return {
+            "months_elapsed": months_elapsed,
+            "grid_only_cumulative_cost": grid_only_cumulative_cost,
+            "solar_cumulative_cost": solar_cumulative_cost,
+            "solar_advantage": solar_advantage,
+            "break_even_month": break_even_month,
+            "analysis_years": analysis_years,
+        }
+
+    def plot_financial_comparison(self, financials, analysis_years=1, currency_symbol="£"):
+        """Plot cumulative solar and grid-only costs, including upfront solar cost."""
+        comparison = self.build_financial_comparison(financials, analysis_years=analysis_years)
+        months_elapsed = comparison["months_elapsed"]
+        grid_only_cumulative_cost = comparison["grid_only_cumulative_cost"]
+        solar_cumulative_cost = comparison["solar_cumulative_cost"]
+        solar_advantage = comparison["solar_advantage"]
+        break_even_month = comparison["break_even_month"]
+
+        fig, (ax_costs, ax_advantage) = plt.subplots(
+            2,
+            1,
+            figsize=(12, 9),
+            sharex=True,
+            gridspec_kw={"height_ratios": [2, 1]},
+        )
+
+        ax_costs.plot(
+            months_elapsed,
+            grid_only_cumulative_cost,
+            linewidth=2.5,
+            color="#D55E00",
+            label="Grid only",
+        )
+        ax_costs.plot(
+            months_elapsed,
+            solar_cumulative_cost,
+            linewidth=2.5,
+            color="#009E73",
+            label="Solar + grid import",
+        )
+        ax_costs.set_ylabel(f"Cumulative Cost ({currency_symbol})")
+        ax_costs.set_title(f"Solar vs Grid-Only Financial Comparison for {self.name}")
+        ax_costs.grid(axis="y", alpha=0.3)
+        ax_costs.legend()
+
+        ax_advantage.axhline(0, color="#444444", linewidth=1)
+        ax_advantage.plot(
+            months_elapsed,
+            solar_advantage,
+            linewidth=2.5,
+            color="#0072B2",
+            label="Solar advantage vs grid only",
+        )
+        ax_advantage.fill_between(
+            months_elapsed,
+            solar_advantage,
+            0,
+            where=[value >= 0 for value in solar_advantage],
+            color="#009E73",
+            alpha=0.2,
+            interpolate=True,
+        )
+        ax_advantage.fill_between(
+            months_elapsed,
+            solar_advantage,
+            0,
+            where=[value < 0 for value in solar_advantage],
+            color="#D55E00",
+            alpha=0.2,
+            interpolate=True,
+        )
+        ax_advantage.set_ylabel(f"+/- vs Grid ({currency_symbol})")
+        ax_advantage.set_xlabel("Time")
+        ax_advantage.grid(axis="y", alpha=0.3)
+
+        final_advantage = solar_advantage[-1]
+        ax_advantage.text(
+            months_elapsed[-1],
+            final_advantage,
+            f" {currency_symbol}{final_advantage:.0f}",
+            va="bottom" if final_advantage >= 0 else "top",
+            ha="left",
+            fontsize=9,
+        )
+
+        tick_positions = [0] + [year * 12 for year in range(1, analysis_years + 1)]
+        tick_labels = ["Initial"] + [f"Year {year}" for year in range(1, analysis_years + 1)]
+        ax_advantage.set_xticks(tick_positions)
+        ax_advantage.set_xticklabels(tick_labels, rotation=45, ha="right")
+
+        if break_even_month is None:
+            break_even_text = f"No break-even within {analysis_years} years"
+        else:
+            break_even_years = break_even_month / 12
+            ax_advantage.axvline(break_even_month, color="#009E73", linestyle="--", linewidth=1.5)
+            ax_advantage.scatter([break_even_month], [0], color="#009E73", zorder=5)
+            break_even_text = (
+                f"Break-even after {break_even_years:.1f} years\n"
+                f"(~month {break_even_month:.1f})"
+            )
+            ax_advantage.annotate(
+                break_even_text,
+                xy=(break_even_month, 0),
+                xytext=(12, 18),
+                textcoords="offset points",
+                bbox={"boxstyle": "round,pad=0.4", "facecolor": "white", "alpha": 0.9},
+                arrowprops={"arrowstyle": "->", "color": "#009E73"},
+                fontsize=9,
+            )
+
+        if break_even_month is None:
+            ax_advantage.text(
+                0.02,
+                0.95,
+                break_even_text,
+                transform=ax_advantage.transAxes,
+                va="top",
+                ha="left",
+                fontsize=9,
+                bbox={"boxstyle": "round,pad=0.4", "facecolor": "white", "alpha": 0.9},
+            )
+
+        plt.tight_layout()
+
+        safe_name = self.name.replace(" ", "_")
+        output_path = f"{safe_name}_financial_comparison.svg"
+        plt.savefig(output_path)
+        plt.close(fig)
+        return output_path
+
+    def estimate_solar_financials(
+        self,
+        monthly_solar_generation,
+        sell_price_per_kwh,
+        monthly_consumption=None,
+        buy_price_per_kwh=None,
+        initial_cost=0,
+    ):
         """Estimate monthly and annual earnings from solar export.
 
         Args:
@@ -181,6 +390,7 @@ class DogShelter:
             sell_price_per_kwh: selling price in currency/kWh (e.g. £/kWh).
             monthly_consumption: optional dict/list of kWh consumed; defaults to this shelter's monthly energy.
             buy_price_per_kwh: purchase price in currency/kWh for imported energy; used to calculate savings.
+            initial_cost: optional upfront installation cost in currency units.
 
         Returns:
             Dict with monthly breakdown and annual totals.
@@ -188,6 +398,9 @@ class DogShelter:
         if buy_price_per_kwh is None:
             # Backward-compatible default if only one tariff is supplied.
             buy_price_per_kwh = sell_price_per_kwh
+
+        if initial_cost < 0:
+            raise ValueError("Initial cost cannot be negative")
 
         months = list(self.climate.keys())
 
@@ -245,6 +458,11 @@ class DogShelter:
             annual_savings += savings
             annual_total_benefit += total_benefit
 
+        net_benefit_after_initial_cost = annual_total_benefit - initial_cost
+        simple_payback_years = None
+        if initial_cost > 0 and annual_total_benefit > 0:
+            simple_payback_years = initial_cost / annual_total_benefit
+
         return {
             "monthly": monthly_results,
             "annual": {
@@ -255,6 +473,9 @@ class DogShelter:
                 "revenue": annual_revenue,
                 "savings": annual_savings,
                 "total_benefit": annual_total_benefit,
+                "initial_cost": initial_cost,
+                "net_benefit_after_initial_cost": net_benefit_after_initial_cost,
+                "simple_payback_years": simple_payback_years,
                 "sell_price_per_kwh": sell_price_per_kwh,
                 "buy_price_per_kwh": buy_price_per_kwh,
             },
@@ -295,6 +516,13 @@ class DogShelter:
             f"{currency_symbol}{annual['savings']:>11.2f} "
             f"{currency_symbol}{annual['total_benefit']:>11.2f}"
         )
+
+        print(f"\nInitial cost: {currency_symbol}{annual['initial_cost']:.2f}")
+        print(f"Year 1 net benefit after initial cost: {currency_symbol}{annual['net_benefit_after_initial_cost']:.2f}")
+        if annual["simple_payback_years"] is None:
+            print("Simple payback: n/a")
+        else:
+            print(f"Simple payback: {annual['simple_payback_years']:.2f} years")
 
     def save_solar_financials_csv(self, financials, file_path=None):
         """Save the month-by-month financial table to a CSV file."""
@@ -342,10 +570,100 @@ class DogShelter:
                 round(annual["total_benefit"], 2),
             ])
 
+            writer.writerow(["Initial Cost", "", "", "", "", "", "", "", round(annual["initial_cost"], 2)])
+            writer.writerow([
+                "Year 1 Net Benefit",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                round(annual["net_benefit_after_initial_cost"], 2),
+            ])
+            writer.writerow([
+                "Simple Payback (years)",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+                if annual["simple_payback_years"] is None
+                else round(annual["simple_payback_years"], 2),
+            ])
+
         return file_path
 
 
-if __name__ == "__main__":
+def print_financial_summary(
+    financials,
+    report_title,
+    export_price,
+    energy_price,
+    analysis_years,
+):
+    """Print the annual solar finance summary."""
+    annual = financials["annual"]
+
+    print(f"\n{report_title}")
+    print(f"Annual consumption (kWh): {annual['consumption_kwh']:.1f}")
+    print(f"Annual solar generation (kWh): {annual['solar_generation_kwh']:.1f}")
+    print(f"Annual export (kWh): {annual['exported_kwh']:.1f}")
+    print(f"Annual revenue (@ {export_price:.2f}/kWh): {annual['revenue']:.2f}")
+    print(f"Annual savings (@ {energy_price:.2f}/kWh): {annual['savings']:.2f}")
+    print(f"Annual total benefit: {annual['total_benefit']:.2f}")
+    print(f"Initial cost: {annual['initial_cost']:.2f}")
+    print(f"Year 1 net benefit after initial cost: {annual['net_benefit_after_initial_cost']:.2f}")
+    print(f"Comparison horizon: {analysis_years} years")
+    if annual["simple_payback_years"] is None:
+        print("Simple payback: n/a")
+    else:
+        print(f"Simple payback: {annual['simple_payback_years']:.2f} years")
+
+
+def run_shelter_analysis(
+    shelter,
+    monthly_solar_generation,
+    export_price,
+    energy_price,
+    initial_cost,
+    report_title,
+    analysis_years,
+):
+    """Run financial analysis, print a summary, and save related outputs."""
+    shelter.print()
+    financials = shelter.estimate_solar_financials(
+        monthly_solar_generation=monthly_solar_generation,
+        sell_price_per_kwh=export_price,
+        buy_price_per_kwh=energy_price,
+        initial_cost=initial_cost,
+    )
+
+    print_financial_summary(
+        financials=financials,
+        report_title=report_title,
+        export_price=export_price,
+        energy_price=energy_price,
+        analysis_years=analysis_years,
+    )
+
+    saved_csv_path = shelter.save_solar_financials_csv(financials)
+    print(f"Saved financial CSV: {saved_csv_path}")
+
+    financial_plot_path = shelter.plot_financial_comparison(
+        financials,
+        analysis_years=analysis_years,
+    )
+    print(f"Saved financial graph: {financial_plot_path}")
+
+    shelter.plot_monthly_energy()
+
+
+def main():
     base_dir = Path(__file__).resolve().parent
     wales_csv = base_dir / "res" / "WalesData.csv"
     italy_csv = base_dir / "res" / "ItalyData.csv"
@@ -355,50 +673,44 @@ if __name__ == "__main__":
 
     # Heat loss coefficient: 1.0 W/(m²·K) = typical older building with average insulation
     standard_hl_coef = 1.0
+    heating_efficiency = 0.9
+    cooling_efficiency = 3.0
     ukshelter = DogShelter("Many Tears Rescue Wales", 175,
-                           standard_hl_coef, crosshands_monthly_temps)
+                           standard_hl_coef, crosshands_monthly_temps,
+                           heating_efficiency=heating_efficiency,
+                           cooling_efficiency=cooling_efficiency)
     italyshelter = DogShelter(
-        "APS", 188, standard_hl_coef, cornaredo_monthly_temps)
-    ukshelter.print()
-    italyshelter.print()
+        "APS", 188, standard_hl_coef, cornaredo_monthly_temps,
+        heating_efficiency=heating_efficiency,
+        cooling_efficiency=cooling_efficiency)
 
     # Example tariffs (e.g. £/kWh)
     # TODO: change these to accurate values for each country, and ideally make them dynamic inputs
     export_price = 0.15
     energy_price = 0.30
-    uk_financials = ukshelter.estimate_solar_financials(
+    solar_panel_lifetime = 25
+    uk_initial_cost = 18000
+    italy_initial_cost = 22000
+
+    run_shelter_analysis(
+        shelter=ukshelter,
         monthly_solar_generation=uk_monthly_solar_generation,
-        sell_price_per_kwh=export_price,
-        buy_price_per_kwh=energy_price,
+        export_price=export_price,
+        energy_price=energy_price,
+        initial_cost=uk_initial_cost,
+        report_title="UK Shelter Solar Financial Estimate",
+        analysis_years=solar_panel_lifetime,
     )
 
-    italy_financials = italyshelter.estimate_solar_financials(
+    run_shelter_analysis(
+        shelter=italyshelter,
         monthly_solar_generation=italy_monthly_solar_generation,
-        sell_price_per_kwh=export_price,
-        buy_price_per_kwh=energy_price,
+        export_price=export_price,
+        energy_price=energy_price,
+        initial_cost=italy_initial_cost,
+        report_title="Italy Shelter Solar Financial Estimate",
+        analysis_years=solar_panel_lifetime,
     )
 
-    print("\nUK Shelter Solar Financial Estimate")
-    print(f"Annual consumption (kWh): {uk_financials['annual']['consumption_kwh']:.1f}")
-    print(f"Annual solar generation (kWh): {uk_financials['annual']['solar_generation_kwh']:.1f}")
-    print(f"Annual export (kWh): {uk_financials['annual']['exported_kwh']:.1f}")
-    print(f"Annual revenue (@ {export_price:.2f}/kWh): {uk_financials['annual']['revenue']:.2f}")
-    print(f"Annual savings (@ {energy_price:.2f}/kWh): {uk_financials['annual']['savings']:.2f}")
-    print(f"Annual total benefit: {uk_financials['annual']['total_benefit']:.2f}")
-    ukshelter.print_solar_financials_table(uk_financials)
-    uk_saved_csv_path = ukshelter.save_solar_financials_csv(uk_financials)
-    print(f"Saved financial CSV: {uk_saved_csv_path}")
-
-    print("\nItaly Shelter Solar Financial Estimate")
-    print(f"Annual consumption (kWh): {italy_financials['annual']['consumption_kwh']:.1f}")
-    print(f"Annual solar generation (kWh): {italy_financials['annual']['solar_generation_kwh']:.1f}")
-    print(f"Annual export (kWh): {italy_financials['annual']['exported_kwh']:.1f}")
-    print(f"Annual revenue (@ {export_price:.2f}/kWh): {italy_financials['annual']['revenue']:.2f}")
-    print(f"Annual savings (@ {energy_price:.2f}/kWh): {italy_financials['annual']['savings']:.2f}")
-    print(f"Annual total benefit: {italy_financials['annual']['total_benefit']:.2f}")
-    italyshelter.print_solar_financials_table(italy_financials)
-    saved_csv_path = italyshelter.save_solar_financials_csv(italy_financials)
-    print(f"Saved financial CSV: {saved_csv_path}")
-
-    ukshelter.plot_monthly_energy()
-    italyshelter.plot_monthly_energy()
+if __name__ == "__main__":
+    main()
