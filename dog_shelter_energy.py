@@ -675,7 +675,7 @@ def main():
     standard_hl_coef = 1.0
     heating_efficiency = 0.9
     cooling_efficiency = 3.0
-    ukshelter = DogShelter("Many Tears Rescue Wales", 175,
+    ukshelter = DogShelter("Many_Tears_Rescue_Wales", 175,
                            standard_hl_coef, crosshands_monthly_temps,
                            heating_efficiency=heating_efficiency,
                            cooling_efficiency=cooling_efficiency)
