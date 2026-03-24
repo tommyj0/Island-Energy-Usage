@@ -1,0 +1,6 @@
+location,source_file,module_count,pv_profile_file,upfront_cost,annual_consumption_kwh,annual_solar_generation_kwh,export_price_per_kwh,energy_price_per_kwh,annual_revenue,annual_savings,annual_total_benefit,year_1_net_benefit,payback_years,pv_profile_self_consumption_rate,self_consumption_rate,npv,pi,dpp_years,irr
+Italy,ItalyData10.csv,10,ItalyDataPV10.csv,5800.0,13931.99,5102.1,0.043,0.29,51.52,1132.13,1183.65,-4616.35,4.9,0.7644,0.7652,10114.27,2.7438,5.84,0.197072
+Italy,ItalyData12.csv,12,ItalyDataPV12.csv,6960.0,13931.99,6122.4,0.043,0.29,79.71,1237.9,1317.61,-5642.39,5.28,0.6965,0.6972,10755.34,2.5453,6.39,0.181743
+Wales,WalesData10.csv,10,WalesDataPV.csv,6804.0,14171.02,4326.9,0.1,0.2818,61.55,1045.87,1107.42,-5696.58,6.14,0.8578,0.8578,8085.35,2.1883,7.67,0.153739
+Wales,WalesData12.csv,12,WalesDataPV12.csv,8164.8,14171.02,5397.6,0.1,0.2818,109.19,1213.35,1322.54,-6842.26,6.17,0.7928,0.7977,9616.82,2.1778,7.72,0.152905
+Wales,WalesData14.csv,14,WalesDataPV14.csv,9525.6,14171.02,6297.3,0.1,0.2818,164.3,1311.57,1475.88,-8049.72,6.45,0.7336,0.7391,10317.64,2.0831,8.15,0.145342
