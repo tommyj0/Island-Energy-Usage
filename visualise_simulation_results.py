@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def visualise_simulation_results():
-    """Load consolidated simulation results and create one figure per location."""
+    """Load consolidated simulation results and create separate plot files per location."""
     base_dir = Path(__file__).resolve().parent
     output_dir = base_dir / "out"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -20,10 +20,6 @@ def visualise_simulation_results():
     for location in sorted(locations):
         location_data = df[df["location"] == location].sort_values("module_count")
 
-        fig, axes = plt.subplots(2, 2, figsize=(15.5, 10.5))
-        axes = axes.flatten()
-        fig.suptitle(f"{location} Solar Simulation Results", fontsize=16, fontweight="bold")
-
         # Use numeric positions for x-axis (for proper bar centring)
         x_pos = np.arange(len(location_data), dtype=float)
         module_counts = location_data["module_count"].values
@@ -32,9 +28,10 @@ def visualise_simulation_results():
         self_consumption_label_offset = 0.8
         baseline_payback = float(location_data["payback_years"].iloc[0])
         payback_change = location_data["payback_years"] - baseline_payback
+        safe_location = location.replace(" ", "_")
 
         # Plot 1: Upfront Cost vs Module Count
-        ax = axes[0]
+        fig, ax = plt.subplots(figsize=(8.2, 6.2))
         ax.plot(
             x_pos,
             location_data["upfront_cost"],
@@ -45,9 +42,9 @@ def visualise_simulation_results():
             label="Upfront Cost",
         )
         ax.fill_between(x_pos, location_data["upfront_cost"], alpha=0.2, color="#D55E00")
-        ax.set_xlabel("Module Count")
-        ax.set_ylabel("Upfront Cost (£)")
-        ax.set_title("Upfront Installation Cost")
+        ax.set_xlabel("Module Count", fontsize=15)
+        ax.set_ylabel("Upfront Cost (£)", fontsize=15)
+        ax.set_title("Upfront Cost", fontsize=18)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(module_counts)
         ax.grid(axis="y", alpha=0.3)
@@ -59,9 +56,14 @@ def visualise_simulation_results():
                 ha="center",
                 fontsize=9,
             )
+        fig.tight_layout()
+        upfront_file = output_dir / f"simulation_results_{safe_location}_upfront_cost.svg"
+        plt.savefig(upfront_file, format="svg", dpi=150)
+        print(f"Saved visualisation: {upfront_file}")
+        plt.close(fig)
 
         # Plot 2: NPV vs Module Count
-        ax = axes[1]
+        fig, ax = plt.subplots(figsize=(8.2, 6.2))
         ax.plot(
             x_pos,
             location_data["npv"],
@@ -72,9 +74,9 @@ def visualise_simulation_results():
         )
         ax.fill_between(x_pos, location_data["npv"], alpha=0.2, color="#56B4E9")
         ax.axhline(0, color="red", linestyle="--", linewidth=1, alpha=0.5, label="Break-even")
-        ax.set_xlabel("Module Count")
-        ax.set_ylabel("NPV (£)")
-        ax.set_title("Net Present Value (25 years)")
+        ax.set_xlabel("Module Count", fontsize=15)
+        ax.set_ylabel("NPV (£)", fontsize=15)
+        ax.set_title("NPV (25y)", fontsize=18)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(module_counts)
         ax.legend()
@@ -87,9 +89,14 @@ def visualise_simulation_results():
                 ha="center",
                 fontsize=9,
             )
+        fig.tight_layout()
+        npv_file = output_dir / f"simulation_results_{safe_location}_npv.svg"
+        plt.savefig(npv_file, format="svg", dpi=150)
+        print(f"Saved visualisation: {npv_file}")
+        plt.close(fig)
 
         # Plot 3: Self-consumption vs Module Count
-        ax = axes[2]
+        fig, ax = plt.subplots(figsize=(8.2, 6.2))
         profile_rate_pct = location_data["pv_profile_self_consumption_rate"] * 100
         realised_rate_pct = location_data["self_consumption_rate"] * 100
         ax.plot(
@@ -110,9 +117,9 @@ def visualise_simulation_results():
             color="#CC79A7",
             label="Realised in financials",
         )
-        ax.set_xlabel("Module Count")
-        ax.set_ylabel("Self-consumption (%)")
-        ax.set_title("Self-consumption Rate")
+        ax.set_xlabel("Module Count", fontsize=15)
+        ax.set_ylabel("Self-consumption (%)", fontsize=15)
+        ax.set_title("Self-Consumption", fontsize=18)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(module_counts)
         ymin = max(0, float(min(profile_rate_pct.min(), realised_rate_pct.min()) - 3))
@@ -138,9 +145,14 @@ def visualise_simulation_results():
                 fontsize=8,
                 color="#CC79A7",
             )
+        fig.tight_layout()
+        self_consumption_file = output_dir / f"simulation_results_{safe_location}_self_consumption.svg"
+        plt.savefig(self_consumption_file, format="svg", dpi=150)
+        print(f"Saved visualisation: {self_consumption_file}")
+        plt.close(fig)
 
         # Plot 4: Change in Payback Time vs Module Count
-        ax = axes[3]
+        fig, ax = plt.subplots(figsize=(8.2, 6.2))
         ax.plot(
             x_pos,
             payback_change,
@@ -151,9 +163,9 @@ def visualise_simulation_results():
             label="Change vs lowest module count",
         )
         ax.axhline(0, color="#444444", linewidth=1, linestyle="--", alpha=0.7)
-        ax.set_xlabel("Module Count")
-        ax.set_ylabel("Payback Change (years)")
-        ax.set_title("Change in Simple Payback Time")
+        ax.set_xlabel("Module Count", fontsize=15)
+        ax.set_ylabel("Payback Change (years)", fontsize=15)
+        ax.set_title("Payback Change", fontsize=18)
         ax.set_xticks(x_pos)
         ax.set_xticklabels(module_counts)
         ax.grid(axis="y", alpha=0.3)
@@ -161,21 +173,82 @@ def visualise_simulation_results():
         for i, pos in enumerate(x_pos):
             delta = float(payback_change.iloc[i])
             sign = "+" if delta > 0 else ""
-            ax.text(
-                pos,
-                delta + (0.03 if delta >= 0 else -0.03),
+            ax.annotate(
                 f"{sign}{delta:.2f}y",
+                xy=(pos, delta),
+                xytext=(0, 8 if delta >= 0 else -10),
+                textcoords="offset points",
                 ha="center",
                 va="bottom" if delta >= 0 else "top",
                 fontsize=8,
+                bbox={"boxstyle": "round,pad=0.15", "facecolor": "white", "alpha": 0.85, "edgecolor": "none"},
             )
+        fig.tight_layout()
+        payback_change_file = output_dir / f"simulation_results_{safe_location}_payback_change.svg"
+        plt.savefig(payback_change_file, format="svg", dpi=150)
+        print(f"Saved visualisation: {payback_change_file}")
+        plt.close(fig)
 
-        fig.subplots_adjust(left=0.07, right=0.98, top=0.90, bottom=0.10, wspace=0.28, hspace=0.30)
+        # Plot 5: Discounted vs Non-discounted Payback Time
+        fig, ax = plt.subplots(figsize=(8.2, 6.2))
+        simple_payback = pd.to_numeric(location_data["payback_years"], errors="coerce")
+        discounted_payback = pd.to_numeric(location_data["dpp_years"], errors="coerce")
+        ax.plot(
+            x_pos,
+            simple_payback,
+            marker="o",
+            linewidth=2.3,
+            markersize=8,
+            color="#E69F00",
+            label="Simple payback (non-discounted)",
+        )
+        ax.plot(
+            x_pos,
+            discounted_payback,
+            marker="s",
+            linewidth=2.3,
+            markersize=8,
+            color="#0072B2",
+            label="Discounted payback",
+        )
+        ax.set_xlabel("Module Count", fontsize=15)
+        ax.set_ylabel("Payback Time (years)", fontsize=15)
+        ax.set_title("Payback: Discounted vs Simple", fontsize=18)
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(module_counts)
+        ax.grid(axis="y", alpha=0.3)
+        ax.legend()
 
-        safe_location = location.replace(" ", "_")
-        output_file = output_dir / f"simulation_results_{safe_location}.svg"
-        plt.savefig(output_file, format="svg", dpi=150)
-        print(f"Saved visualisation: {output_file}")
+        for i, pos in enumerate(x_pos):
+            if pd.notna(simple_payback.iloc[i]):
+                ax.annotate(
+                    f"{float(simple_payback.iloc[i]):.2f}y",
+                    xy=(pos, float(simple_payback.iloc[i])),
+                    xytext=(0, 8),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    color="#E69F00",
+                    bbox={"boxstyle": "round,pad=0.15", "facecolor": "white", "alpha": 0.85, "edgecolor": "none"},
+                )
+            if pd.notna(discounted_payback.iloc[i]):
+                ax.annotate(
+                    f"{float(discounted_payback.iloc[i]):.2f}y",
+                    xy=(pos, float(discounted_payback.iloc[i])),
+                    xytext=(0, -10),
+                    textcoords="offset points",
+                    ha="center",
+                    va="top",
+                    fontsize=8,
+                    color="#0072B2",
+                    bbox={"boxstyle": "round,pad=0.15", "facecolor": "white", "alpha": 0.85, "edgecolor": "none"},
+                )
+
+        fig.tight_layout()
+        payback_compare_file = output_dir / f"simulation_results_{safe_location}_payback_comparison.svg"
+        plt.savefig(payback_compare_file, format="svg", dpi=150)
+        print(f"Saved visualisation: {payback_compare_file}")
         plt.close(fig)
 
 

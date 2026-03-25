@@ -233,6 +233,8 @@ class DogShelter:
 
     def plot_monthly_energy(self, output_dir=None):
         months = list(self.climate.keys())
+        display_name = self.name.replace("_", " ")
+        display_name = re.sub(r"(\d+)modules\b", r"\1 Modules", display_name, flags=re.IGNORECASE)
 
         plt.figure(figsize=(12, 6))
         x_pos = range(len(months))
@@ -267,9 +269,9 @@ class DogShelter:
             plt.text(i, total, f'{total:.1f}',
                      ha='center', va='bottom', fontsize=9)
 
-        plt.xlabel('Month')
-        plt.ylabel('Energy Consumption (kWh)')
-        plt.title(f'Monthly Energy Consumption Split for {self.name}')
+        plt.xlabel('Month', fontsize=15)
+        plt.ylabel('Energy Consumption (kWh)', fontsize=15)
+        plt.title(f'Demand: {display_name}', fontsize=18)
         plt.xticks(x_pos, months, rotation=45, ha='right')
         plt.legend()
         plt.grid(axis='y', alpha=0.3)
@@ -281,8 +283,18 @@ class DogShelter:
         plt.close()
         return str(output_path)
 
-    def build_financial_comparison(self, financials, analysis_years=1, annual_discount_rate=0.0):
-        """Build cumulative discounted cost series for solar versus grid-only operation."""
+    def build_financial_comparison(
+        self,
+        financials,
+        analysis_years=1,
+        annual_discount_rate=0.05,
+        annual_degradation_rate=0.0,
+    ):
+        """Build cumulative discounted cost series for solar versus grid-only operation.
+
+        Applies annual PV degradation to self-consumed/exported solar terms so the plotted
+        break-even follows the same degradation assumption used in discounted payback metrics.
+        """
         monthly_financials = financials["monthly"]
         annual_financials = financials["annual"]
         months = list(monthly_financials.keys())
@@ -303,12 +315,20 @@ class DogShelter:
             for month in months:
                 values = monthly_financials[month]
                 grid_only_monthly_cost = values["consumption_kwh"] * buy_price_per_kwh
+                degradation_factor = (1 - annual_degradation_rate) ** (month_counter / 12)
+                degraded_self_consumed_kwh = values["self_consumed_kwh"] * degradation_factor
+                degraded_revenue = values["revenue"] * degradation_factor
+                degraded_net_grid_import_kwh = max(
+                    0,
+                    values["consumption_kwh"] - degraded_self_consumed_kwh,
+                )
                 solar_monthly_cost = (
-                    values["net_grid_import_kwh"] * buy_price_per_kwh
-                    - values["revenue"]
+                    degraded_net_grid_import_kwh * buy_price_per_kwh
+                    - degraded_revenue
                 )
 
-                discount_factor = (1 + annual_discount_rate) ** (month_counter / 12)
+                # Apply discount at the end of each month to align timing with DCF treatment.
+                discount_factor = (1 + annual_discount_rate) ** ((month_counter + 1) / 12)
                 discounted_grid_only_monthly_cost = grid_only_monthly_cost / discount_factor
                 discounted_solar_monthly_cost = solar_monthly_cost / discount_factor
 
@@ -344,7 +364,9 @@ class DogShelter:
         financials,
         analysis_years=1,
         currency_symbol="£",
-        annual_discount_rate=0.0,
+        annual_discount_rate=0.05,
+        annual_degradation_rate=0.0,
+        discounted_payback_years=None,
         output_dir=None,
     ):
         """Plot cumulative discounted solar and grid-only costs, including upfront solar cost."""
@@ -352,12 +374,21 @@ class DogShelter:
             financials,
             analysis_years=analysis_years,
             annual_discount_rate=annual_discount_rate,
+            annual_degradation_rate=annual_degradation_rate,
         )
         months_elapsed = comparison["months_elapsed"]
         grid_only_cumulative_cost = comparison["grid_only_cumulative_cost"]
         solar_cumulative_cost = comparison["solar_cumulative_cost"]
         solar_advantage = comparison["solar_advantage"]
         break_even_month = comparison["break_even_month"]
+
+        # When provided, align graph break-even annotation with the same DPP metric
+        # used in tabular simulation results.
+        if discounted_payback_years is not None:
+            break_even_month = discounted_payback_years * 12
+
+        display_name = self.name.replace("_", " ")
+        display_name = re.sub(r"(\d+)modules\b", r"\1 Modules", display_name, flags=re.IGNORECASE)
 
         fig, (ax_costs, ax_advantage) = plt.subplots(
             2,
@@ -381,10 +412,10 @@ class DogShelter:
             color="#009E73",
             label="Solar + grid import",
         )
-        ax_costs.set_ylabel(f"Cumulative Discounted Cost ({currency_symbol})")
+        ax_costs.set_ylabel(f"Cumulative Discounted Cost ({currency_symbol})", fontsize=15)
         ax_costs.set_title(
-            f"Solar vs Grid-Only Financial Comparison for {self.name}"
-            f" ({annual_discount_rate * 100:.1f}% discount rate)"
+            f"Financials: {display_name}",
+            fontsize=18,
         )
         ax_costs.grid(axis="y", alpha=0.3)
         ax_costs.legend()
@@ -415,8 +446,8 @@ class DogShelter:
             alpha=0.2,
             interpolate=True,
         )
-        ax_advantage.set_ylabel(f"+/- Discounted vs Grid ({currency_symbol})")
-        ax_advantage.set_xlabel("Time")
+        ax_advantage.set_ylabel(f"+/- Discounted vs Grid ({currency_symbol})", fontsize=15)
+        ax_advantage.set_xlabel("Time", fontsize=15)
         ax_advantage.grid(axis="y", alpha=0.3)
 
         final_advantage = solar_advantage[-1]
@@ -1070,8 +1101,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     watt_per_module = 400
-    cost_per_kwatt_uk = 1701
-    cost_per_kwatt_it = 1450
+    cost_per_kwatt_uk = 1730
+    cost_per_kwatt_it = 1600*0.87*0.6 # first number is in euros
 
     # Heat loss coefficient: 1.0 W/(m²·K) = typical older building with average insulation
     standard_hl_coef = 0.5
@@ -1112,6 +1143,17 @@ def main():
     for config in shelter_configs:
         climate_file_path = res_dir / config["climate_file"]
         climate, _ = load_monthly_data(climate_file_path)
+
+        demand_shelter = DogShelter(
+            name=config["shelter_name"],
+            area=config["area"],
+            heat_loss_coef=standard_hl_coef,
+            climate=climate,
+            heating_efficiency=heating_efficiency,
+            cooling_efficiency=cooling_efficiency,
+        )
+        location_monthly_plot_path = demand_shelter.plot_monthly_energy(output_dir=output_dir)
+        print(f"{config['location']} demand graph: {location_monthly_plot_path}")
 
         scenarios = find_module_count_csvs(res_dir, config["file_prefix"])
         if not scenarios:
@@ -1198,12 +1240,11 @@ def main():
                 financials=financials,
                 analysis_years=solar_panel_lifetime,
                 annual_discount_rate=discount_rate,
+                annual_degradation_rate=annual_degradation_rate,
+                discounted_payback_years=discounted_metrics["dpp_years"],
                 output_dir=output_dir,
             )
             print(f"  Saved financial graph: {financial_plot_path}")
-
-            monthly_plot_path = shelter.plot_monthly_energy(output_dir=output_dir)
-            print(f"  Saved monthly demand graph: {monthly_plot_path}")
 
             financial_csv_path = shelter.save_solar_financials_csv(financials, output_dir=output_dir)
             print(f"  Saved financial CSV: {financial_csv_path}")
